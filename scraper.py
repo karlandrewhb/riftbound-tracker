@@ -148,7 +148,19 @@ def fetch_page(query):
     print(f"DEBUG: received {len(html)} chars of HTML")
     print(f"DEBUG: contains 'riftbound'? {'riftbound' in lowered}")
     print(f"DEBUG: contains 's-item'? {'s-item' in lowered}")
-    print(f"DEBUG: contains 'oil pump'? {'oil pump' in lowered}  (if true, eBay served a decoy page)")
+
+    from bs4 import BeautifulSoup as _BS
+    _soup = _BS(html, "html.parser")
+    for sel in ["li.s-item", "li.s-card", "div.s-item", "ul.srp-results > li", "[data-testid]"]:
+        found = _soup.select(sel)
+        print(f"DEBUG: selector '{sel}' matched {len(found)} elements")
+    shown = 0
+    for li in _soup.find_all(["li", "div"]):
+        txt = li.get_text(" ", strip=True).lower()
+        if "riftbound" in txt and "psa" in txt and shown < 2:
+            classes = li.get("class", [])
+            print(f"DEBUG SAMPLE {shown}: <{li.name} class={classes}> textstart={txt[:80]!r}")
+            shown += 1
 
     return html
 
