@@ -39,8 +39,22 @@ HEADERS = {
         "AppleWebKit/537.36 (KHTML, like Gecko) "
         "Chrome/125.0.0.0 Safari/537.36"
     ),
+    "Accept": (
+        "text/html,application/xhtml+xml,application/xml;q=0.9,"
+        "image/avif,image/webp,image/apng,*/*;q=0.8"
+    ),
     "Accept-Language": "en-US,en;q=0.9",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Sec-Ch-Ua": '"Chromium";v="125", "Not.A/Brand";v="24", "Google Chrome";v="125"',
+    "Sec-Ch-Ua-Mobile": "?0",
+    "Sec-Ch-Ua-Platform": '"macOS"',
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Sec-Fetch-User": "?1",
+    "Upgrade-Insecure-Requests": "1",
+    "Cache-Control": "max-age=0",
+    "Connection": "keep-alive",
 }
 
 # Titles containing any of these are dropped (lots, sealed product, wrong grade).
@@ -107,7 +121,16 @@ def title_is_relevant(title):
 
 def fetch_page(query):
     url = SEARCH_URL.format(query=requests.utils.quote(query))
-    resp = requests.get(url, headers=HEADERS, timeout=30)
+    # A session lets eBay set cookies on a warm-up hit, which a real browser
+    # would have. We touch the homepage first, then the search.
+    sess = requests.Session()
+    sess.headers.update(HEADERS)
+    try:
+        sess.get("https://www.ebay.com/", timeout=30)
+        time.sleep(random.uniform(1.5, 3.5))
+    except Exception:
+        pass  # warm-up is best-effort; proceed to the real request regardless
+    resp = sess.get(url, headers={**HEADERS, "Referer": "https://www.ebay.com/"}, timeout=30)
     resp.raise_for_status()
     return resp.text
 
@@ -174,7 +197,7 @@ def append_rows(rows):
 # --- Main -------------------------------------------------------------------
 
 def main():
-    now = dt.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    now = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     print(f"[{now}] Scraping: {QUERY}")
 
     # small polite jitter before the single request
