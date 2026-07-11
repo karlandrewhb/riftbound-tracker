@@ -93,16 +93,13 @@ def extract_card_name(title):
     Pull a card identifier from a messy eBay title.
     Prefers 'Name #NNN' or 'Name NNN'; falls back to first chunk before PSA.
     """
-    # Try to grab a name + number token, e.g. 'Jinx #301' or 'Jinx 301'
     m = re.search(r"([A-Z][A-Za-z'.\- ]+?)\s*#?(\d{2,4})", title)
     if m:
         name = m.group(1).strip()
         num = m.group(2)
-        # Trim leading set/junk words if any
         name = re.sub(r"\b(riftbound|signature|foil|holo|tcg|card|the)\b", "", name, flags=re.I).strip()
         if name:
             return f"{name} #{num}"
-    # Fallback: everything before 'PSA'
     pre = re.split(r"\bPSA\b", title, flags=re.I)[0]
     pre = re.sub(r"\b(riftbound|signature|foil|holo|tcg|card)\b", "", pre, flags=re.I).strip()
     return pre[:40] if pre else "unknown"
@@ -131,14 +128,29 @@ def fetch_page(query):
         return resp.text
 
     # Route through ScraperAPI so eBay sees a residential IP and returns
-    # real results instead of a decoy page. country_code keeps us on US eBay.
+    # real results instead of a decoy page. render=true runs eBay's
+    # JavaScript so the search results actually populate.
     resp = requests.get(
         "https://api.scraperapi.com/",
-        params={"api_key": api_key, "url": target, "country_code": "us"},
-        timeout=90,   # proxy adds latency; give it room
+        params={
+            "api_key": api_key,
+            "url": target,
+            "country_code": "us",
+            "render": "true",
+        },
+        timeout=120,   # JS rendering + proxy adds latency; give it room
     )
     resp.raise_for_status()
-    return resp.text
+    html = resp.text
+
+    # Debug: tell us what actually came back so a zero-result run is diagnosable.
+    lowered = html.lower()
+    print(f"DEBUG: received {len(html)} chars of HTML")
+    print(f"DEBUG: contains 'riftbound'? {'riftbound' in lowered}")
+    print(f"DEBUG: contains 's-item'? {'s-item' in lowered}")
+    print(f"DEBUG: contains 'oil pump'? {'oil pump' in lowered}  (if true, eBay served a decoy page)")
+
+    return html
 
 
 def parse_listings(html):
@@ -149,7 +161,6 @@ def parse_listings(html):
         title_el = it.select_one(".s-item__title")
         price_el = it.select_one(".s-item__price")
         link_el = it.select_one("a.s-item__link")
-        date_el = it.select_one(".s-item__caption--signal, .POSITIVE, .s-item__title--tagblock")
 
         if not title_el or not price_el or not link_el:
             continue
@@ -164,7 +175,6 @@ def parse_listings(html):
         m = re.search(r"/itm/(?:.*?/)?(\d{9,})", url)
         item_id = m.group(1) if m else url
 
-        # Sold date sometimes sits in a caption element near the price
         date_text = ""
         caption = it.select_one(".s-item__caption")
         if caption:
@@ -206,7 +216,6 @@ def main():
     now = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     print(f"[{now}] Scraping: {QUERY}")
 
-    # small polite jitter before the single request
     time.sleep(random.uniform(1, 3))
 
     try:
@@ -218,7 +227,6 @@ def main():
     listings = parse_listings(html)
     print(f"Parsed {len(listings)} relevant sold listings.")
 
-    # Block-detection: a normally-populated query returning zero is a red flag.
     if len(listings) == 0:
         print(
             "WARNING: 0 listings parsed. Either genuinely no sales, "
