@@ -120,17 +120,23 @@ def title_is_relevant(title):
 # --- Scrape -----------------------------------------------------------------
 
 def fetch_page(query):
-    url = SEARCH_URL.format(query=requests.utils.quote(query))
-    # A session lets eBay set cookies on a warm-up hit, which a real browser
-    # would have. We touch the homepage first, then the search.
-    sess = requests.Session()
-    sess.headers.update(HEADERS)
-    try:
-        sess.get("https://www.ebay.com/", timeout=30)
-        time.sleep(random.uniform(1.5, 3.5))
-    except Exception:
-        pass  # warm-up is best-effort; proceed to the real request regardless
-    resp = sess.get(url, headers={**HEADERS, "Referer": "https://www.ebay.com/"}, timeout=30)
+    target = SEARCH_URL.format(query=requests.utils.quote(query))
+
+    api_key = os.environ.get("SCRAPERAPI_KEY")
+    if not api_key:
+        # No proxy key: hit eBay directly. Works from a home IP, usually
+        # decoyed/blocked from a datacenter (e.g. GitHub Actions).
+        resp = requests.get(target, headers=HEADERS, timeout=60)
+        resp.raise_for_status()
+        return resp.text
+
+    # Route through ScraperAPI so eBay sees a residential IP and returns
+    # real results instead of a decoy page. country_code keeps us on US eBay.
+    resp = requests.get(
+        "https://api.scraperapi.com/",
+        params={"api_key": api_key, "url": target, "country_code": "us"},
+        timeout=90,   # proxy adds latency; give it room
+    )
     resp.raise_for_status()
     return resp.text
 
