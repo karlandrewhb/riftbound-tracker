@@ -72,17 +72,61 @@ def parse_sold_date(raw):
     return None
 
 
+# ============================================================
+# Card identity: group by SET + CHARACTER.
+# The character name appears in nearly every eBay title and,
+# combined with the set, uniquely identifies a card. Card numbers
+# are unreliable (missing, or mangled like "#3001*/298"), so they
+# are NOT used for grouping.
+# ============================================================
+
+CHARACTERS = [
+    "AHRI", "YASUO", "VAYNE", "IRELIA", "TEEMO", "SORAKA", "BARD", "SETT",
+    "JINX", "LEONA", "VOLIBEAR", "VIKTOR", "DARIUS", "KAI'SA", "KAISA",
+    "MISS FORTUNE", "LEE SIN", "LEESIN", "APHELIOS", "KARMA", "YONE",
+    "MASTER YI", "DIANA", "VI", "KHA'ZIX", "KHAZIX", "RENGAR", "LEBLANC",
+    "LILLIA", "VEX", "ICATHIAN RAIN",
+]
+
+CHAR_ALIASES = {"KAISA": "KAI'SA", "KHAZIX": "KHA'ZIX", "LEESIN": "LEE SIN"}
+
+SETS = [
+    ("OGN", ["OGN", "ORIGINS"]),
+    ("SFD", ["SFD", "SPIRITFORGED", "SPIRIT FORGE"]),
+    ("UNL", ["UNL", "UNLEASHED"]),
+    ("CS",  ["S.CHINESE", "CHINESE", "CS"]),
+]
+
+
+def norm_character(t):
+    # Longest match first so "MISS FORTUNE" beats a stray "VI".
+    for c in sorted(CHARACTERS, key=len, reverse=True):
+        if re.search(r"\b" + re.escape(c) + r"\b", t):
+            return CHAR_ALIASES.get(c, c)
+    return ""
+
+
+def norm_set(t):
+    for code, aliases in SETS:
+        for a in aliases:
+            if re.search(r"\b" + re.escape(a), t):
+                return code
+    return ""
+
+
 def extract_card_name(title):
-    m = re.search(r"([A-Z][A-Za-z'.\- ]+?)\s*#?(\d{2,4})", title)
-    if m:
-        name = m.group(1).strip()
-        num = m.group(2)
-        name = re.sub(r"\b(riftbound|signature|foil|holo|tcg|card|the)\b", "", name, flags=re.I).strip()
-        if name:
-            return f"{name} #{num}"
-    pre = re.split(r"\bPSA\b", title, flags=re.I)[0]
-    pre = re.sub(r"\b(riftbound|signature|foil|holo|tcg|card)\b", "", pre, flags=re.I).strip()
-    return pre[:40] if pre else "unknown"
+    """Stable group key derived from the raw eBay title."""
+    t = title.upper()
+    s = norm_set(t)
+    ch = norm_character(t)
+
+    if s and ch:
+        return f"{s} {ch.title()}"
+    if ch:
+        return ch.title()
+    if s:
+        return f"{s} (unidentified)"
+    return "UNKNOWN"
 
 
 def title_is_relevant(title):
