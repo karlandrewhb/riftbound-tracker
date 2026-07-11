@@ -22,7 +22,6 @@ from bs4 import BeautifulSoup
 # --- Config -----------------------------------------------------------------
 
 QUERY = "riftbound signature psa 10"
-# LH_Sold=1 & LH_Complete=1 = sold + completed. _sop=13 = most recent first.
 SEARCH_URL = (
     "https://www.ebay.com/sch/i.html"
     "?_nkw={query}"
@@ -32,7 +31,6 @@ SEARCH_URL = (
 CSV_PATH = os.path.join(os.path.dirname(__file__), "sales_history.csv")
 FIELDNAMES = ["item_id", "card_name", "title", "price_usd", "sold_date", "scraped_at", "url"]
 
-# A realistic desktop UA reduces the chance of an instant block.
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -44,20 +42,8 @@ HEADERS = {
         "image/avif,image/webp,image/apng,*/*;q=0.8"
     ),
     "Accept-Language": "en-US,en;q=0.9",
-    "Accept-Encoding": "gzip, deflate, br",
-    "Sec-Ch-Ua": '"Chromium";v="125", "Not.A/Brand";v="24", "Google Chrome";v="125"',
-    "Sec-Ch-Ua-Mobile": "?0",
-    "Sec-Ch-Ua-Platform": '"macOS"',
-    "Sec-Fetch-Dest": "document",
-    "Sec-Fetch-Mode": "navigate",
-    "Sec-Fetch-Site": "none",
-    "Sec-Fetch-User": "?1",
-    "Upgrade-Insecure-Requests": "1",
-    "Cache-Control": "max-age=0",
-    "Connection": "keep-alive",
 }
 
-# Titles containing any of these are dropped (lots, sealed product, wrong grade).
 EXCLUDE_TERMS = [
     "lot", "bundle", "proxy", "custom", "sealed", "box", "case",
     "playset", "psa 9", "psa 8", "bgs", "cgc", "9.5", "reprint",
@@ -66,7 +52,6 @@ EXCLUDE_TERMS = [
 # --- Parsing helpers --------------------------------------------------------
 
 def clean_price(raw):
-    """'$123.45' or 'US $1,234.56' -> 123.45 (float) or None."""
     if not raw:
         return None
     m = re.search(r"[\d,]+\.\d{2}", raw)
@@ -76,7 +61,6 @@ def clean_price(raw):
 
 
 def parse_sold_date(raw):
-    """'Sold  Mar 3, 2026' -> '2026-03-03'. Falls back to None on failure."""
     if not raw:
         return None
     raw = raw.replace("Sold", "").strip()
@@ -89,10 +73,6 @@ def parse_sold_date(raw):
 
 
 def extract_card_name(title):
-    """
-    Pull a card identifier from a messy eBay title.
-    Prefers 'Name #NNN' or 'Name NNN'; falls back to first chunk before PSA.
-    """
     m = re.search(r"([A-Z][A-Za-z'.\- ]+?)\s*#?(\d{2,4})", title)
     if m:
         name = m.group(1).strip()
@@ -121,15 +101,12 @@ def fetch_page(query):
 
     api_key = os.environ.get("SCRAPERAPI_KEY")
     if not api_key:
-        # No proxy key: hit eBay directly. Works from a home IP, usually
-        # decoyed/blocked from a datacenter (e.g. GitHub Actions).
         resp = requests.get(target, headers=HEADERS, timeout=60)
         resp.raise_for_status()
         return resp.text
 
-    # Route through ScraperAPI so eBay sees a residential IP and returns
-    # real results instead of a decoy page. render=true runs eBay's
-    # JavaScript so the search results actually populate.
+    # ScraperAPI with render=true: residential IP + runs eBay's JavaScript so
+    # the search results actually populate.
     resp = requests.get(
         "https://api.scraperapi.com/",
         params={
@@ -138,65 +115,64 @@ def fetch_page(query):
             "country_code": "us",
             "render": "true",
         },
-        timeout=120,   # JS rendering + proxy adds latency; give it room
+        timeout=120,
     )
     resp.raise_for_status()
-    html = resp.text
+    return resp.text
 
-    # Debug: tell us what actually came back so a zero-result run is diagnosable.
-    lowered = html.lower()
-    print(f"DEBUG: received {len(html)} chars of HTML")
-    print(f"DEBUG: contains 'riftbound'? {'riftbound' in lowered}")
-    print(f"DEBUG: contains 's-item'? {'s-item' in lowered}")
 
-    from bs4 import BeautifulSoup as _BS
-    _soup = _BS(html, "html.parser")
-    for sel in ["li.s-item", "li.s-card", "div.s-item", "ul.srp-results > li", "[data-testid]"]:
-        found = _soup.select(sel)
-        print(f"DEBUG: selector '{sel}' matched {len(found)} elements")
-    shown = 0
-    for li in _soup.find_all(["li", "div"]):
-        txt = li.get_text(" ", strip=True).lower()
-        if "riftbound" in txt and "psa" in txt and shown < 2:
-            classes = li.get("class", [])
-            print(f"DEBUG SAMPLE {shown}: <{li.name} class={classes}> textstart={txt[:80]!r}")
-            shown += 1
-
-    return html
+def _first_text(el, selectors):
+    for sel in selectors:
+        found = el.select_one(sel)
+        if found:
+            txt = found.get_text(" ", strip=True)
+            if txt:
+                return txt
+    return ""
 
 
 def parse_listings(html):
     soup = BeautifulSoup(html, "html.parser")
-    items = soup.select("li.s-item")
+
+    items = (
+        soup.select("li.s-card")
+        or soup.select("ul.srp-results > li")
+        or soup.select("li.s-item")
+    )
+
     results = []
     for it in items:
-        title_el = it.select_one(".s-item__title")
-        price_el = it.select_one(".s-item__price")
-        link_el = it.select_one("a.s-item__link")
-
-        if not title_el or not price_el or not link_el:
-            continue
-
-        title = title_el.get_text(" ", strip=True)
-        if title.lower().startswith("shop on ebay"):
+        title = _first_text(it, [
+            ".s-card__title", ".s-item__title", '[class*="title"]',
+        ])
+        if not title or title.lower().startswith("shop on ebay"):
             continue
         if not title_is_relevant(title):
             continue
 
-        url = link_el.get("href", "").split("?")[0]
-        m = re.search(r"/itm/(?:.*?/)?(\d{9,})", url)
-        item_id = m.group(1) if m else url
+        price_text = _first_text(it, [
+            ".s-card__price", ".s-item__price", '[class*="price"]',
+        ])
 
-        date_text = ""
-        caption = it.select_one(".s-item__caption")
-        if caption:
-            date_text = caption.get_text(" ", strip=True)
+        link_el = it.select_one('a[href*="/itm/"]') or it.select_one("a[href]")
+        url = link_el.get("href", "").split("?")[0] if link_el else ""
+        m = re.search(r"/itm/(?:.*?/)?(\d{9,})", url)
+        item_id = m.group(1) if m else (url or title)
+
+        date_text = _first_text(it, [
+            ".s-card__caption", ".s-item__caption",
+            '[class*="caption"]', '[class*="sold"]',
+        ])
+
+        price = clean_price(price_text)
+        if price is None:
+            continue
 
         results.append({
             "item_id": item_id,
             "card_name": extract_card_name(title),
             "title": title,
-            "price_usd": clean_price(price_el.get_text(strip=True)),
+            "price_usd": price,
             "sold_date": parse_sold_date(date_text),
             "url": url,
         })
@@ -242,7 +218,7 @@ def main():
     if len(listings) == 0:
         print(
             "WARNING: 0 listings parsed. Either genuinely no sales, "
-            "an eBay layout change, or a CAPTCHA/block. Check manually.",
+            "an eBay layout change, or a block. Check manually.",
             file=sys.stderr,
         )
 
