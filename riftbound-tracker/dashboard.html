@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Riftbound Signature PSA 10 · Sold Tracker</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+<style>
+  :root {
+    --ink: #0d1b2a;
+    --paper: #f2ede3;
+    --line: #c9bfae;
+    --accent: #b3541e;   /* rune-copper */
+    --accent2: #1b5e5a;  /* deep teal */
+    --muted: #6b6353;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+    line-height: 1.5;
+  }
+  header {
+    padding: 32px 24px 20px;
+    border-bottom: 2px solid var(--ink);
+    max-width: 1100px;
+    margin: 0 auto;
+  }
+  .eyebrow {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 12px;
+    letter-spacing: .18em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 6px;
+  }
+  h1 { margin: 0; font-size: 30px; font-weight: 600; letter-spacing: -.01em; }
+  .sub { color: var(--muted); font-size: 14px; margin-top: 6px; }
+  main { max-width: 1100px; margin: 0 auto; padding: 24px; }
+  .stats {
+    display: flex; flex-wrap: wrap; gap: 20px;
+    padding: 16px 0 24px; border-bottom: 1px solid var(--line);
+  }
+  .stat .n { font-size: 26px; font-weight: 600; }
+  .stat .l {
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted);
+  }
+  .controls { margin: 20px 0 8px; }
+  select {
+    font: inherit; padding: 7px 10px; border: 1px solid var(--ink);
+    background: var(--paper); border-radius: 0;
+  }
+  .wrap { position: relative; height: 460px; margin-top: 12px; }
+  table { width: 100%; border-collapse: collapse; margin-top: 32px; font-size: 14px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+  th { font-family: ui-monospace, Menlo, monospace; font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+  td.price { font-variant-numeric: tabular-nums; }
+  .empty { color: var(--muted); padding: 40px 0; }
+  a { color: var(--accent2); }
+</style>
+</head>
+<body>
+<header>
+  <p class="eyebrow">Sold · Completed · eBay</p>
+  <h1>Riftbound Signature PSA 10</h1>
+  <div class="sub">Auto-split by card. Data appended daily from one saved search.</div>
+</header>
+<main>
+  <div class="stats" id="stats"></div>
+
+  <div class="controls">
+    <label>Show card:
+      <select id="cardFilter"><option value="__all">All cards</option></select>
+    </label>
+  </div>
+
+  <div class="wrap"><canvas id="chart"></canvas></div>
+
+  <table id="salesTable">
+    <thead><tr><th>Sold date</th><th>Card</th><th>Title</th><th>Price</th></tr></thead>
+    <tbody></tbody>
+  </table>
+
+  <p class="empty" id="emptyMsg" hidden>
+    No sales recorded yet. Once the daily scrape runs and finds sold listings,
+    they'll appear here.
+  </p>
+</main>
+
+<script>
+const PALETTE = ["#b3541e","#1b5e5a","#8a6d3b","#3d5a80","#985277","#5c6b3f","#a34e3b","#43607a"];
+
+function fmtUSD(n){ return n==null ? "—" : "$"+Number(n).toFixed(2); }
+
+function median(arr){
+  if(!arr.length) return null;
+  const s=[...arr].sort((a,b)=>a-b), m=Math.floor(s.length/2);
+  return s.length%2 ? s[m] : (s[m-1]+s[m])/2;
+}
+
+Papa.parse("sales_history.csv", {
+  download:true, header:true, skipEmptyLines:true,
+  complete: (res) => render(res.data.filter(r => r.item_id))
+});
+
+function render(rows){
+  rows.forEach(r => { r.price_usd = r.price_usd ? parseFloat(r.price_usd) : null;
+                      r.date = r.sold_date || (r.scraped_at||"").slice(0,10); });
+  rows = rows.filter(r => r.price_usd != null);
+
+  const empty = document.getElementById("emptyMsg");
+  if(!rows.length){ empty.hidden=false; return; }
+
+  const prices = rows.map(r=>r.price_usd);
+  const cards = [...new Set(rows.map(r=>r.card_name))].sort();
+
+  document.getElementById("stats").innerHTML = `
+    <div class="stat"><div class="n">${rows.length}</div><div class="l">Total sales</div></div>
+    <div class="stat"><div class="n">${cards.length}</div><div class="l">Distinct cards</div></div>
+    <div class="stat"><div class="n">${fmtUSD(median(prices))}</div><div class="l">Median price</div></div>
+    <div class="stat"><div class="n">${fmtUSD(Math.max(...prices))}</div><div class="l">High</div></div>
+    <div class="stat"><div class="n">${fmtUSD(Math.min(...prices))}</div><div class="l">Low</div></div>`;
+
+  const sel = document.getElementById("cardFilter");
+  cards.forEach(c => { const o=document.createElement("option"); o.value=c; o.textContent=c; sel.appendChild(o); });
+
+  const ctx = document.getElementById("chart");
+  let chart;
+
+  function draw(filter){
+    const shown = filter==="__all" ? cards : [filter];
+    const datasets = shown.map((c,i) => {
+      const pts = rows.filter(r=>r.card_name===c)
+                      .sort((a,b)=> (a.date>b.date?1:-1))
+                      .map(r=>({x:r.date, y:r.price_usd}));
+      const col = PALETTE[i % PALETTE.length];
+      return { label:c, data:pts, borderColor:col, backgroundColor:col,
+               pointRadius:4, tension:.2, spanGaps:true };
+    });
+    if(chart) chart.destroy();
+    chart = new Chart(ctx, {
+      type:"line",
+      data:{ datasets },
+      options:{
+        responsive:true, maintainAspectRatio:false,
+        parsing:false,
+        scales:{
+          x:{ type:"category",
+              labels:[...new Set(rows.map(r=>r.date))].sort(),
+              title:{display:true,text:"Sold date"} },
+          y:{ title:{display:true,text:"Price (USD)"},
+              ticks:{ callback:v=>"$"+v } }
+        },
+        plugins:{ legend:{ position:"bottom" } }
+      }
+    });
+  }
+  draw("__all");
+  sel.addEventListener("change", e => draw(e.target.value));
+
+  // recent sales table (last 40)
+  const tb = document.querySelector("#salesTable tbody");
+  rows.sort((a,b)=> (a.date<b.date?1:-1)).slice(0,40).forEach(r=>{
+    const tr=document.createElement("tr");
+    tr.innerHTML = `<td>${r.date||"—"}</td><td>${r.card_name}</td>
+      <td><a href="${r.url}" target="_blank" rel="noopener">${r.title.slice(0,70)}</a></td>
+      <td class="price">${fmtUSD(r.price_usd)}</td>`;
+    tb.appendChild(tr);
+  });
+}
+</script>
+</body>
+</html>
