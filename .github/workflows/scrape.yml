@@ -39,3 +39,9 @@ jobs:
             git commit -m "data: sales update $(date -u +%Y-%m-%d)"
             git push
           fi
+
+      - name: Sync to Google Sheets
+        env:
+          GOOGLE_SA_JSON: ${{ secrets.GOOGLE_SA_JSON }}
+          SHEET_ID: ${{ secrets.SHEET_ID }}
+        run: python sheets_sync.py
