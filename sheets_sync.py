@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """
-Push Riftbound sold-price summary to Google Sheets.
+Push Riftbound sold-price data to Google Sheets.
 
-Reads sales_history.csv, aggregates per card_name, and overwrites two tabs
-in the target spreadsheet:
-  - "Summary" : one row per card with price stats
-  - "Raw"     : full sales_history dump (for reference/pivots)
+Reads sales_history.csv, resolves each eBay title to a canonical card via
+card_resolver, and overwrites four tabs:
 
-Auth: service-account JSON in env var GOOGLE_SA_JSON, spreadsheet id in
-env var SHEET_ID.
+  Summary   - one row per card, price stats, sorted by recent median
+  Last Sold - every sale, newest first, flagged if new this scrape
+  Raw       - untouched CSV dump
+  Review    - rows the resolver could not identify (needs a human)
+
+Auth: service-account JSON in GOOGLE_SA_JSON, spreadsheet id in SHEET_ID.
 """
 
 import csv
@@ -20,10 +22,12 @@ import datetime as dt
 import gspread
 from google.oauth2.service_account import Credentials
 
-CSV_PATH = os.path.join(os.path.dirname(__file__), "sales_history.csv")
+from card_resolver import resolve
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+CSV_PATH = os.path.join(HERE, "sales_history.csv")
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
-# Only sales on/after this many days back count toward the "recent" stats.
 RECENT_DAYS = 30
 
 
@@ -39,34 +43,54 @@ def to_date(s):
         return None
 
 
-def build_summary(rows):
-    today = dt.date.today()
-    cutoff = today - dt.timedelta(days=RECENT_DAYS)
+def to_price(s):
+    try:
+        return float(s)
+    except (ValueError, TypeError):
+        return None
 
+
+def enrich(rows):
+    """Attach resolved card identity to every row."""
+    out = []
+    for r in rows:
+        st, num, champ, sub, method, flag = resolve(r.get("title", ""))
+        card = f"{st}-{num} {champ} {sub}".strip() if not flag else ""
+        r = dict(r)
+        r["_set"] = st or ""
+        r["_num"] = num or ""
+        r["_champ"] = champ or ""
+        r["_sub"] = sub or ""
+        r["_card"] = card
+        r["_method"] = method
+        r["_flag"] = flag
+        r["_price"] = to_price(r.get("price_usd"))
+        r["_date"] = to_date(r.get("sold_date"))
+        out.append(r)
+    return out
+
+
+def build_summary(rows):
+    """Per-card stats. Flagged rows are excluded so the math stays clean."""
+    cutoff = dt.date.today() - dt.timedelta(days=RECENT_DAYS)
     by_card = {}
     for r in rows:
-        name = r["card_name"]
-        try:
-            price = float(r["price_usd"])
-        except (ValueError, TypeError):
+        if r["_flag"] or r["_price"] is None:
             continue
-        d = to_date(r["sold_date"])
-        by_card.setdefault(name, []).append((price, d))
+        by_card.setdefault(r["_card"], []).append(r)
 
     summary = []
-    for name, sales in sorted(by_card.items()):
-        prices = [p for p, _ in sales]
-        recent = [p for p, d in sales if d and d >= cutoff]
-        dated = [(p, d) for p, d in sales if d]
-        last_price = ""
-        last_date = ""
-        if dated:
-            last_p, last_d = max(dated, key=lambda x: x[1])
-            last_price = round(last_p, 2)
-            last_date = last_d.isoformat()
+    for card, sales in by_card.items():
+        prices = [s["_price"] for s in sales]
+        recent = [s["_price"] for s in sales if s["_date"] and s["_date"] >= cutoff]
+        dated = [s for s in sales if s["_date"]]
+        last = max(dated, key=lambda s: s["_date"]) if dated else None
+        first = sales[0]
 
         summary.append([
-            name,
+            card,
+            first["_set"],
+            first["_num"],
             len(prices),
             round(min(prices), 2),
             round(max(prices), 2),
@@ -74,53 +98,114 @@ def build_summary(rows):
             round(statistics.mean(prices), 2),
             round(statistics.median(recent), 2) if recent else "",
             len(recent),
-            last_price,
-            last_date,
+            round(last["_price"], 2) if last else "",
+            last["_date"].isoformat() if last else "",
         ])
 
-    # Sort by recent-median desc, then all-time median, so hot cards float up.
-    summary.sort(key=lambda x: (x[6] if x[6] != "" else -1, x[4]), reverse=True)
+    summary.sort(key=lambda x: (x[8] if x[8] != "" else -1, x[6]), reverse=True)
     return summary
 
 
-def main():
-    sa_json = os.environ["GOOGLE_SA_JSON"]
-    sheet_id = os.environ["SHEET_ID"]
+def build_last_sold(rows, latest_batch):
+    """Every sale, newest first. Flagged rows show the flag instead of a name."""
+    def sort_key(r):
+        return (r["_date"] or dt.date.min, r.get("scraped_at", ""))
 
-    creds = Credentials.from_service_account_info(json.loads(sa_json), scopes=SCOPES)
-    gc = gspread.authorize(creds)
-    sh = gc.open_by_key(sheet_id)
+    out = []
+    for r in sorted(rows, key=sort_key, reverse=True):
+        out.append([
+            r.get("sold_date", ""),
+            r["_card"] or f"[{r['_flag']}]",
+            r["_set"],
+            r["_num"],
+            round(r["_price"], 2) if r["_price"] is not None else "",
+            "NEW" if r.get("scraped_at") == latest_batch else "",
+            r["_method"],
+            r.get("scraped_at", ""),
+            r.get("url", ""),
+        ])
+    return out
 
-    rows = load_rows()
-    summary = build_summary(rows)
-    stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
-    header = [
-        "Card", "Sales (all)", "Min", "Max", "Median (all)", "Mean (all)",
-        f"Median ({RECENT_DAYS}d)", f"Sales ({RECENT_DAYS}d)",
-        "Last price", "Last sold",
-    ]
-
-    # --- Summary tab ---
+def write_tab(sh, title, header, data, banner=None):
+    """Overwrite a tab. Creates it if missing."""
+    body = ([banner] if banner else []) + [header] + data
+    need_rows = len(body) + 20
+    need_cols = max(len(header), 1)
     try:
-        ws = sh.worksheet("Summary")
+        ws = sh.worksheet(title)
         ws.clear()
     except gspread.WorksheetNotFound:
-        ws = sh.add_worksheet(title="Summary", rows=len(summary) + 10, cols=len(header))
+        ws = sh.add_worksheet(title=title, rows=need_rows, cols=need_cols)
+    ws.update(body, "A1")
+    return ws
 
-    ws.update([[f"Updated {stamp}"], header] + summary, "A1")
 
-    # --- Raw tab ---
-    raw_header = ["item_id", "card_name", "title", "price_usd", "sold_date", "scraped_at", "url"]
-    raw = [[r.get(k, "") for k in raw_header] for r in rows]
-    try:
-        rws = sh.worksheet("Raw")
-        rws.clear()
-    except gspread.WorksheetNotFound:
-        rws = sh.add_worksheet(title="Raw", rows=len(raw) + 10, cols=len(raw_header))
-    rws.update([raw_header] + raw, "A1")
+def main():
+    creds = Credentials.from_service_account_info(
+        json.loads(os.environ["GOOGLE_SA_JSON"]), scopes=SCOPES
+    )
+    gc = gspread.authorize(creds)
+    sheet_id = os.environ["SHEET_ID"]
+    sh = gc.open_by_key(sheet_id)
 
-    print(f"Synced {len(summary)} cards / {len(raw)} sales to sheet.")
+    raw_rows = load_rows()
+    rows = enrich(raw_rows)
+    batches = sorted({r.get("scraped_at", "") for r in rows if r.get("scraped_at")})
+    latest_batch = batches[-1] if batches else ""
+    stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+    resolved = [r for r in rows if not r["_flag"]]
+    flagged = [r for r in rows if r["_flag"]]
+
+    # --- Summary ---
+    summary = build_summary(rows)
+    write_tab(
+        sh, "Summary",
+        ["Card", "Set", "No.", "Sales (all)", "Min", "Max",
+         "Median (all)", "Mean (all)",
+         f"Median ({RECENT_DAYS}d)", f"Sales ({RECENT_DAYS}d)",
+         "Last price", "Last sold"],
+        summary,
+        banner=[f"Updated {stamp}  |  {len(summary)} cards  |  "
+                f"{len(resolved)} sales  |  {len(flagged)} need review"],
+    )
+
+    # --- Last Sold ---
+    last_sold = build_last_sold(rows, latest_batch)
+    write_tab(
+        sh, "Last Sold",
+        ["Sold date", "Card", "Set", "No.", "Price USD",
+         "New", "Match method", "Scraped at", "URL"],
+        last_sold,
+        banner=[f"Updated {stamp}  |  {len(last_sold)} sales  |  "
+                f"latest scrape {latest_batch}"],
+    )
+
+    # --- Raw ---
+    raw_header = ["item_id", "card_name", "title", "price_usd",
+                  "sold_date", "scraped_at", "url"]
+    write_tab(sh, "Raw", raw_header,
+              [[r.get(k, "") for k in raw_header] for r in raw_rows])
+
+    # --- Review ---
+    review = [[r.get("sold_date", ""), r.get("title", ""),
+               round(r["_price"], 2) if r["_price"] is not None else "",
+               r["_flag"], r.get("url", "")]
+              for r in flagged]
+    write_tab(
+        sh, "Review",
+        ["Sold date", "Title", "Price USD", "Why flagged", "URL"],
+        review,
+        banner=[f"Updated {stamp}  |  {len(review)} rows could not be "
+                f"identified automatically"],
+    )
+
+    print(f"Wrote to: {sh.title}")
+    print(f"  https://docs.google.com/spreadsheets/d/{sheet_id}")
+    print(f"  Summary   : {len(summary)} cards")
+    print(f"  Last Sold : {len(last_sold)} sales ({latest_batch} = newest)")
+    print(f"  Review    : {len(review)} flagged")
 
 
 if __name__ == "__main__":
