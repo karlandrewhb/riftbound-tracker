@@ -50,10 +50,22 @@ def to_price(s):
         return None
 
 
+# Card types kept out of Summary / Last Sold / Review.
+# They remain in the Raw tab and in sales_history.csv, so nothing is lost.
+EXCLUDE_TYPES = ("signature spell",)
+
+
+def is_excluded(title):
+    t = title.lower()
+    return any(x in t for x in EXCLUDE_TYPES)
+
+
 def enrich(rows):
-    """Attach resolved card identity to every row."""
+    """Attach resolved card identity to every row, skipping excluded types."""
     out = []
     for r in rows:
+        if is_excluded(r.get("title", "")):
+            continue
         st, num, champ, sub, method, flag = resolve(r.get("title", ""))
         card = f"{st}-{num} {champ} {sub}".strip() if not flag else ""
         r = dict(r)
