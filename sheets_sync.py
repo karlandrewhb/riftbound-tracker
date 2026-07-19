@@ -85,11 +85,24 @@ def enrich(rows):
 
 
 
-def load_csv(path):
-    if not os.path.exists(path):
+def load_csv(path, required=()):
+    """
+    Read a CSV into dicts, tolerating files that are missing, empty, or
+    headerless (which happens when a data file is cleared by hand and the
+    scraper has not yet rewritten it).
+    """
+    if not os.path.exists(path) or os.path.getsize(path) == 0:
         return []
     with open(path, newline="", encoding="utf-8") as f:
-        return list(csv.DictReader(f))
+        rows = list(csv.DictReader(f))
+    if not rows:
+        return []
+    missing = [c for c in required if c not in rows[0]]
+    if missing:
+        print(f"  WARNING: {os.path.basename(path)} missing column(s) "
+              f"{', '.join(missing)} - ignoring file until next scrape.")
+        return []
+    return rows
 
 
 def build_supply(supply_rows, active_rows, summary):
@@ -155,15 +168,15 @@ def build_supply(supply_rows, active_rows, summary):
         out.append([
             card,
             n,
-            float(r["low_ask"]) if r and r["low_ask"] else "",
+            float(r["low_ask"]) if r and r.get("low_ask") else "",
             round(statistics.median(a), 2) if a else "",
-            int(r["bin_count"]) if r else 0,
-            int(r["auction_count"]) if r else 0,
-            int(r["total_bids"]) if r and r.get("total_bids") else 0,
-            int(r["max_bids"]) if r and r.get("max_bids") else 0,
+            int(r.get("bin_count") or 0) if r else 0,
+            int(r.get("auction_count") or 0) if r else 0,
+            int(r.get("total_bids") or 0) if r else 0,
+            int(r.get("max_bids") or 0) if r else 0,
             n - wk.get(card, n),
             n - mo.get(card, n),
-            r["status"] if r else "no-listings",
+            r.get("status", "") if r else "no-listings",
         ])
 
     # scarcest first, then most contested
@@ -303,8 +316,8 @@ def main():
     )
 
     # --- Supply ---
-    supply_rows = load_csv(SUPPLY_PATH)
-    active_rows = load_csv(ACTIVE_PATH)
+    supply_rows = load_csv(SUPPLY_PATH, required=("snapshot_date", "card_name", "listings"))
+    active_rows = load_csv(ACTIVE_PATH, required=("card_name", "price_usd"))
     supply, snap = build_supply(supply_rows, active_rows, summary)
     if supply:
         write_tab(
