@@ -327,7 +327,7 @@ def parse_active(html):
 def load_first_seen():
     """item_id -> earliest snapshot_date, so we can age listings."""
     seen = {}
-    if not os.path.exists(ACTIVE_PATH):
+    if not os.path.exists(ACTIVE_PATH) or os.path.getsize(ACTIVE_PATH) == 0:
         return seen
     with open(ACTIVE_PATH, newline="", encoding="utf-8") as f:
         for row in csv.DictReader(f):
@@ -357,13 +357,18 @@ def append_supply(rows, today, status):
     for r in rows:
         by_card.setdefault(r["card_name"], []).append(r)
 
-    exists = os.path.exists(SUPPLY_PATH)
-    # don't double-write if this date already recorded
+    # A cleared or headerless file is treated as absent so the header gets
+    # rewritten; otherwise skip if this date is already recorded.
+    exists = os.path.exists(SUPPLY_PATH) and os.path.getsize(SUPPLY_PATH) > 0
     if exists:
         with open(SUPPLY_PATH, newline="", encoding="utf-8") as f:
-            if any(x["snapshot_date"] == today for x in csv.DictReader(f)):
-                print(f"Supply already recorded for {today}; skipping append.")
-                return
+            existing = list(csv.DictReader(f))
+        if existing and "snapshot_date" not in existing[0]:
+            print("listings_history.csv has no usable header; rewriting.")
+            exists = False
+        elif any(x.get("snapshot_date") == today for x in existing):
+            print(f"Supply already recorded for {today}; skipping append.")
+            return
 
     with open(SUPPLY_PATH, "a", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=SUPPLY_FIELDS)
