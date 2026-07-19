@@ -28,8 +28,25 @@ SEARCH_URL = (
     "&LH_Sold=1&LH_Complete=1&_sop=13&_ipg=240"
 )
 
-CSV_PATH = os.path.join(os.path.dirname(__file__), "sales_history.csv")
+# Active (unsold) listings. Uses the category filter _dcat=183454 to scope to
+# trading cards, which cuts noise substantially. _sop=1 = ending soonest.
+ACTIVE_QUERY = "psa 10 signature riftbound"
+ACTIVE_URL = (
+    "https://www.ebay.com/sch/i.html"
+    "?_nkw={query}"
+    "&_sacat=0&_from=R40&_oaa=1&_dcat=183454&_sop=1&_ipg=240"
+)
+
+HERE = os.path.dirname(__file__)
+CSV_PATH = os.path.join(HERE, "sales_history.csv")
+ACTIVE_PATH = os.path.join(HERE, "listings_active.csv")
+SUPPLY_PATH = os.path.join(HERE, "listings_history.csv")
+
 FIELDNAMES = ["item_id", "card_name", "title", "price_usd", "sold_date", "scraped_at", "url"]
+ACTIVE_FIELDS = ["snapshot_date", "item_id", "card_name", "title", "price_usd",
+                 "format", "bids", "time_left", "first_seen", "url"]
+SUPPLY_FIELDS = ["snapshot_date", "card_name", "listings", "low_ask", "bin_count",
+                 "auction_count", "status"]
 
 HEADERS = {
     "User-Agent": (
@@ -140,8 +157,8 @@ def title_is_relevant(title):
 
 # --- Scrape -----------------------------------------------------------------
 
-def fetch_page(query):
-    target = SEARCH_URL.format(query=requests.utils.quote(query))
+def fetch_page(query, url_template=SEARCH_URL, render=True):
+    target = url_template.format(query=requests.utils.quote(query))
 
     api_key = os.environ.get("SCRAPERAPI_KEY")
     if not api_key:
@@ -157,7 +174,7 @@ def fetch_page(query):
             "api_key": api_key,
             "url": target,
             "country_code": "us",
-            "render": "true",
+            "render": "true" if render else "false",
         },
         timeout=120,
     )
@@ -242,6 +259,151 @@ def append_rows(rows):
             w.writerow(r)
 
 
+
+# --- Active listings --------------------------------------------------------
+
+def parse_active(html):
+    """Parse currently-listed (unsold) items. Same filtering as sold."""
+    soup = BeautifulSoup(html, "html.parser")
+    items = (
+        soup.select("li.s-card")
+        or soup.select("ul.srp-results > li")
+        or soup.select("li.s-item")
+    )
+
+    results = []
+    for it in items:
+        title = _first_text(it, [
+            ".s-card__title", ".s-item__title", '[class*="title"]',
+        ])
+        if not title or title.lower().startswith("shop on ebay"):
+            continue
+        if not title_is_relevant(title):
+            continue
+
+        price = clean_price(_first_text(it, [
+            ".s-card__price", ".s-item__price", '[class*="price"]',
+        ]))
+        if price is None:
+            continue
+
+        link_el = it.select_one('a[href*="/itm/"]') or it.select_one("a[href]")
+        url = link_el.get("href", "").split("?")[0] if link_el else ""
+        m = re.search(r"/itm/(?:.*?/)?(\d{9,})", url)
+        item_id = m.group(1) if m else (url or title)
+
+        blob = it.get_text(" ", strip=True).lower()
+        bid_m = re.search(r"(\d+)\s+bids?", blob)
+        bids = int(bid_m.group(1)) if bid_m else ""
+        if bid_m or "bid" in blob:
+            fmt = "auction"
+        elif "buy it now" in blob or "or best offer" in blob:
+            fmt = "bin"
+        else:
+            fmt = "bin"
+
+        tl = re.search(r"(\d+d\s*\d*h|\d+h\s*\d*m|\d+m)\s*left", blob)
+        time_left = tl.group(1) if tl else ""
+
+        results.append({
+            "item_id": item_id,
+            "card_name": extract_card_name(title),
+            "title": title,
+            "price_usd": price,
+            "format": fmt,
+            "bids": bids,
+            "time_left": time_left,
+            "url": url,
+        })
+    return results
+
+
+def load_first_seen():
+    """item_id -> earliest snapshot_date, so we can age listings."""
+    seen = {}
+    if not os.path.exists(ACTIVE_PATH):
+        return seen
+    with open(ACTIVE_PATH, newline="", encoding="utf-8") as f:
+        for row in csv.DictReader(f):
+            fs = row.get("first_seen") or row.get("snapshot_date")
+            iid = row.get("item_id")
+            if iid and fs:
+                seen[iid] = min(seen.get(iid, fs), fs)
+    return seen
+
+
+def write_active(rows, today):
+    """Overwrite: current listings only, with first_seen carried forward."""
+    prior = load_first_seen()
+    with open(ACTIVE_PATH, "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=ACTIVE_FIELDS)
+        w.writeheader()
+        for r in rows:
+            r = dict(r)
+            r["snapshot_date"] = today
+            r["first_seen"] = prior.get(r["item_id"], today)
+            w.writerow({k: r.get(k, "") for k in ACTIVE_FIELDS})
+
+
+def append_supply(rows, today, status):
+    """Append one row per card per day: count, low ask, format split."""
+    by_card = {}
+    for r in rows:
+        by_card.setdefault(r["card_name"], []).append(r)
+
+    exists = os.path.exists(SUPPLY_PATH)
+    # don't double-write if this date already recorded
+    if exists:
+        with open(SUPPLY_PATH, newline="", encoding="utf-8") as f:
+            if any(x["snapshot_date"] == today for x in csv.DictReader(f)):
+                print(f"Supply already recorded for {today}; skipping append.")
+                return
+
+    with open(SUPPLY_PATH, "a", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=SUPPLY_FIELDS)
+        if not exists:
+            w.writeheader()
+        if not by_card:
+            w.writerow({"snapshot_date": today, "card_name": "", "listings": 0,
+                        "low_ask": "", "bin_count": 0, "auction_count": 0,
+                        "status": status})
+            return
+        for card, rs in sorted(by_card.items()):
+            w.writerow({
+                "snapshot_date": today,
+                "card_name": card,
+                "listings": len(rs),
+                "low_ask": round(min(r["price_usd"] for r in rs), 2),
+                "bin_count": sum(1 for r in rs if r["format"] == "bin"),
+                "auction_count": sum(1 for r in rs if r["format"] == "auction"),
+                "status": status,
+            })
+
+
+def scrape_active(today):
+    print(f"Scraping ACTIVE listings: {ACTIVE_QUERY}")
+    time.sleep(random.uniform(2, 5))
+    try:
+        html = fetch_page(ACTIVE_QUERY, url_template=ACTIVE_URL)
+    except Exception as e:
+        print(f"ERROR: active fetch failed: {e}", file=sys.stderr)
+        append_supply([], today, "fetch_failed")
+        return
+
+    rows = parse_active(html)
+    print(f"Parsed {len(rows)} active listings.")
+    if not rows:
+        print("WARNING: 0 active listings parsed (block or layout change?).",
+              file=sys.stderr)
+        append_supply([], today, "zero_parsed")
+        return
+
+    write_active(rows, today)
+    append_supply(rows, today, "ok")
+    print(f"Wrote {len(rows)} active listings across "
+          f"{len({r['card_name'] for r in rows})} cards.")
+
+
 # --- Main -------------------------------------------------------------------
 
 def main():
@@ -276,6 +438,8 @@ def main():
         print(f"Appended {len(new)} new sales.")
     else:
         print("No new sales since last run.")
+
+    scrape_active(dt.date.today().isoformat())
 
 
 if __name__ == "__main__":
