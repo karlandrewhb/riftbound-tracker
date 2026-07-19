@@ -359,16 +359,24 @@ def append_supply(rows, today, status):
 
     # A cleared or headerless file is treated as absent so the header gets
     # rewritten; otherwise skip if this date is already recorded.
-    exists = os.path.exists(SUPPLY_PATH) and os.path.getsize(SUPPLY_PATH) > 0
-    if exists:
+    # Tolerate a file that was cleared by hand and left with stray blank
+    # lines: strip them, and rewrite the header if the first real line is
+    # not one. Otherwise skip if this date is already recorded.
+    exists = False
+    if os.path.exists(SUPPLY_PATH):
         with open(SUPPLY_PATH, newline="", encoding="utf-8") as f:
-            existing = list(csv.DictReader(f))
-        if existing and "snapshot_date" not in existing[0]:
-            print("listings_history.csv has no usable header; rewriting.")
-            exists = False
-        elif any(x.get("snapshot_date") == today for x in existing):
-            print(f"Supply already recorded for {today}; skipping append.")
-            return
+            raw = [ln for ln in f.read().splitlines() if ln.strip()]
+        if raw and not raw[0].startswith("snapshot_date"):
+            print("listings_history.csv header missing; rewriting it.")
+            raw.insert(0, ",".join(SUPPLY_FIELDS))
+        if raw:
+            # rewrite cleanly so the stray newline cannot come back
+            with open(SUPPLY_PATH, "w", newline="", encoding="utf-8") as f:
+                f.write("\n".join(raw) + "\n")
+            exists = True
+            if any(ln.startswith(today + ",") for ln in raw[1:]):
+                print(f"Supply already recorded for {today}; skipping append.")
+                return
 
     with open(SUPPLY_PATH, "a", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=SUPPLY_FIELDS)
