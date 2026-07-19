@@ -122,6 +122,20 @@ def build_supply(supply_rows, active_rows, summary):
 
     current = {r["card_name"]: r for r in supply_rows if r["snapshot_date"] == latest}
 
+    # Historic rows may predate a resolver change and carry stale names
+    # (e.g. "OGN Kai'Sa" vs "OGN-299 Kai'Sa Daughter of the Void"). Drop any
+    # that are not canonical so the tab does not list a card twice.
+    def is_canonical(name):
+        head = name.split(" ")[0]
+        return "-" in head and head.split("-")[0] in ("OGN", "SFD", "UNL")
+
+    stale = [k for k in current if not is_canonical(k) and not k.startswith("[")]
+    if stale:
+        print(f"  Supply    : ignoring {len(stale)} pre-resolver rows "
+              f"({', '.join(sorted(stale)[:4])}...)")
+        for k in stale:
+            current.pop(k)
+
     # median asking price of what is live right now
     asks = {}
     for r in active_rows:
