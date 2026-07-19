@@ -19,6 +19,8 @@ import datetime as dt
 import requests
 from bs4 import BeautifulSoup
 
+from card_resolver import resolve
+
 # --- Config -----------------------------------------------------------------
 
 QUERY = "riftbound signature psa 10"
@@ -44,9 +46,9 @@ SUPPLY_PATH = os.path.join(HERE, "listings_history.csv")
 
 FIELDNAMES = ["item_id", "card_name", "title", "price_usd", "sold_date", "scraped_at", "url"]
 ACTIVE_FIELDS = ["snapshot_date", "item_id", "card_name", "title", "price_usd",
-                 "format", "bids", "time_left", "first_seen", "url"]
+                 "format", "bids", "first_seen", "url"]
 SUPPLY_FIELDS = ["snapshot_date", "card_name", "listings", "low_ask", "bin_count",
-                 "auction_count", "status"]
+                 "auction_count", "total_bids", "max_bids", "status"]
 
 HEADERS = {
     "User-Agent": (
@@ -132,18 +134,26 @@ def norm_set(t):
 
 
 def extract_card_name(title):
-    """Stable group key derived from the raw eBay title."""
+    """
+    Canonical card name via card_resolver (number+set, subtitle, champion, etc).
+
+    Returns e.g. "SFD-227 Ahri Inquisitive". Falls back to the older
+    set+character heuristic only when the resolver cannot identify the card,
+    so ambiguous rows stay visible rather than being silently dropped.
+    """
+    st, num, champ, sub, method, flag = resolve(title)
+    if not flag:
+        return f"{st}-{num} {champ} {sub}".strip()
+
+    # Unresolved: keep something human-readable and mark it.
     t = title.upper()
     s = norm_set(t)
     ch = norm_character(t)
-
-    if s and ch:
-        return f"{s} {ch.title()}"
     if ch:
-        return ch.title()
+        return f"[{flag}] {ch.title()}"
     if s:
-        return f"{s} (unidentified)"
-    return "UNKNOWN"
+        return f"[{flag}] {s}"
+    return f"[{flag}]"
 
 
 def title_is_relevant(title):
@@ -302,9 +312,6 @@ def parse_active(html):
         else:
             fmt = "bin"
 
-        tl = re.search(r"(\d+d\s*\d*h|\d+h\s*\d*m|\d+m)\s*left", blob)
-        time_left = tl.group(1) if tl else ""
-
         results.append({
             "item_id": item_id,
             "card_name": extract_card_name(title),
@@ -312,7 +319,6 @@ def parse_active(html):
             "price_usd": price,
             "format": fmt,
             "bids": bids,
-            "time_left": time_left,
             "url": url,
         })
     return results
@@ -366,9 +372,13 @@ def append_supply(rows, today, status):
         if not by_card:
             w.writerow({"snapshot_date": today, "card_name": "", "listings": 0,
                         "low_ask": "", "bin_count": 0, "auction_count": 0,
-                        "status": status})
+                        "total_bids": 0, "max_bids": 0, "status": status})
             return
         for card, rs in sorted(by_card.items()):
+            # Bid counts only exist on auctions; they are the closest free
+            # proxy for demand available from eBay search results.
+            bids = [int(r["bids"]) for r in rs
+                    if str(r.get("bids", "")).isdigit()]
             w.writerow({
                 "snapshot_date": today,
                 "card_name": card,
@@ -376,6 +386,8 @@ def append_supply(rows, today, status):
                 "low_ask": round(min(r["price_usd"] for r in rs), 2),
                 "bin_count": sum(1 for r in rs if r["format"] == "bin"),
                 "auction_count": sum(1 for r in rs if r["format"] == "auction"),
+                "total_bids": sum(bids) if bids else 0,
+                "max_bids": max(bids) if bids else 0,
                 "status": status,
             })
 
