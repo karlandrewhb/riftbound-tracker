@@ -105,6 +105,14 @@ def load_csv(path, required=()):
     return rows
 
 
+def _num(v, default=""):
+    """Parse a number from CSV text, returning default on anything odd."""
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return default
+
+
 def build_supply(supply_rows, active_rows, summary):
     """
     Current supply per card plus how the listing count has moved.
@@ -116,7 +124,26 @@ def build_supply(supply_rows, active_rows, summary):
     if not supply_rows:
         return [], ""
 
-    dates = sorted({r["snapshot_date"] for r in supply_rows})
+    # Only trust rows whose snapshot_date is a real ISO date. This drops
+    # duplicated header rows, blank lines and any half-written row rather
+    # than letting one bad line break the whole sync.
+    clean = []
+    bad = 0
+    for r in supply_rows:
+        try:
+            dt.date.fromisoformat((r.get("snapshot_date") or "").strip())
+        except (ValueError, AttributeError):
+            bad += 1
+            continue
+        clean.append(r)
+    if bad:
+        print(f"  Supply    : skipped {bad} malformed row(s)")
+    if not clean:
+        print("  Supply    : no usable rows in listings_history.csv")
+        return [], ""
+    supply_rows = clean
+
+    dates = sorted({r["snapshot_date"].strip() for r in supply_rows})
     latest = dates[-1]
 
     def as_of(target):
@@ -125,15 +152,23 @@ def build_supply(supply_rows, active_rows, summary):
         if not usable:
             return {}
         d = usable[-1]
-        return {r["card_name"]: int(r["listings"] or 0)
-                for r in supply_rows if r["snapshot_date"] == d}
+        out = {}
+        for r in supply_rows:
+            if r["snapshot_date"].strip() != d:
+                continue
+            try:
+                out[r["card_name"]] = int(r.get("listings") or 0)
+            except ValueError:
+                continue
+        return out
 
     today = dt.date.fromisoformat(latest)
     now = as_of(latest)
     wk = as_of((today - dt.timedelta(days=7)).isoformat())
     mo = as_of((today - dt.timedelta(days=30)).isoformat())
 
-    current = {r["card_name"]: r for r in supply_rows if r["snapshot_date"] == latest}
+    current = {r["card_name"]: r for r in supply_rows
+               if r["snapshot_date"].strip() == latest}
 
     # Historic rows may predate a resolver change and carry stale names
     # (e.g. "OGN Kai'Sa" vs "OGN-299 Kai'Sa Daughter of the Void"). Drop any
@@ -163,17 +198,17 @@ def build_supply(supply_rows, active_rows, summary):
     out = []
     for card in sorted(set(current) | sold_cards):
         r = current.get(card)
-        n = int(r["listings"]) if r else 0
+        n = int(_num(r.get("listings"), 0)) if r else 0
         a = sorted(asks.get(card, []))
         out.append([
             card,
             n,
-            float(r["low_ask"]) if r and r.get("low_ask") else "",
+            _num(r.get("low_ask")) if r else "",
             round(statistics.median(a), 2) if a else "",
-            int(r.get("bin_count") or 0) if r else 0,
-            int(r.get("auction_count") or 0) if r else 0,
-            int(r.get("total_bids") or 0) if r else 0,
-            int(r.get("max_bids") or 0) if r else 0,
+            int(_num(r.get("bin_count"), 0)) if r else 0,
+            int(_num(r.get("auction_count"), 0)) if r else 0,
+            int(_num(r.get("total_bids"), 0)) if r else 0,
+            int(_num(r.get("max_bids"), 0)) if r else 0,
             n - wk.get(card, n),
             n - mo.get(card, n),
             r.get("status", "") if r else "no-listings",
