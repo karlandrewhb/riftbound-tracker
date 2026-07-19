@@ -26,6 +26,8 @@ from card_resolver import resolve
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CSV_PATH = os.path.join(HERE, "sales_history.csv")
+SUPPLY_PATH = os.path.join(HERE, "listings_history.csv")
+ACTIVE_PATH = os.path.join(HERE, "listings_active.csv")
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
 RECENT_DAYS = 30
@@ -80,6 +82,79 @@ def enrich(rows):
         r["_date"] = to_date(r.get("sold_date"))
         out.append(r)
     return out
+
+
+
+def load_csv(path):
+    if not os.path.exists(path):
+        return []
+    with open(path, newline="", encoding="utf-8") as f:
+        return list(csv.DictReader(f))
+
+
+def build_supply(supply_rows, active_rows, summary):
+    """
+    Current supply per card plus how the listing count has moved.
+
+    Reads the appended daily history for trend, and the current snapshot
+    for today's detail. Cards with sales but no listings are included with
+    a zero count, since 'nothing available' is itself the signal.
+    """
+    if not supply_rows:
+        return [], ""
+
+    dates = sorted({r["snapshot_date"] for r in supply_rows})
+    latest = dates[-1]
+
+    def as_of(target):
+        """Listing count per card on the most recent date at or before target."""
+        usable = [d for d in dates if d <= target]
+        if not usable:
+            return {}
+        d = usable[-1]
+        return {r["card_name"]: int(r["listings"] or 0)
+                for r in supply_rows if r["snapshot_date"] == d}
+
+    today = dt.date.fromisoformat(latest)
+    now = as_of(latest)
+    wk = as_of((today - dt.timedelta(days=7)).isoformat())
+    mo = as_of((today - dt.timedelta(days=30)).isoformat())
+
+    current = {r["card_name"]: r for r in supply_rows if r["snapshot_date"] == latest}
+
+    # median asking price of what is live right now
+    asks = {}
+    for r in active_rows:
+        try:
+            asks.setdefault(r["card_name"], []).append(float(r["price_usd"]))
+        except (ValueError, TypeError):
+            continue
+
+    # cards that have sold, so we can flag ones with zero supply
+    sold_cards = {row[0] for row in summary}
+
+    out = []
+    for card in sorted(set(current) | sold_cards):
+        r = current.get(card)
+        n = int(r["listings"]) if r else 0
+        a = sorted(asks.get(card, []))
+        out.append([
+            card,
+            n,
+            float(r["low_ask"]) if r and r["low_ask"] else "",
+            round(statistics.median(a), 2) if a else "",
+            int(r["bin_count"]) if r else 0,
+            int(r["auction_count"]) if r else 0,
+            int(r["total_bids"]) if r and r.get("total_bids") else 0,
+            int(r["max_bids"]) if r and r.get("max_bids") else 0,
+            n - wk.get(card, n),
+            n - mo.get(card, n),
+            r["status"] if r else "no-listings",
+        ])
+
+    # scarcest first, then most contested
+    out.sort(key=lambda x: (x[1], -x[6]))
+    return out, latest
 
 
 def build_summary(rows):
@@ -212,6 +287,25 @@ def main():
         banner=[f"Updated {stamp}  |  {len(review)} rows could not be "
                 f"identified automatically"],
     )
+
+    # --- Supply ---
+    supply_rows = load_csv(SUPPLY_PATH)
+    active_rows = load_csv(ACTIVE_PATH)
+    supply, snap = build_supply(supply_rows, active_rows, summary)
+    if supply:
+        write_tab(
+            sh, "Supply",
+            ["Card", "Listings", "Low ask", "Median ask", "BIN", "Auction",
+             "Total bids", "Max bids", "7d change", "30d change", "Status"],
+            supply,
+            banner=[f"Updated {stamp}  |  snapshot {snap}  |  "
+                    f"{sum(r[1] for r in supply)} listings across "
+                    f"{sum(1 for r in supply if r[1] > 0)} cards"],
+        )
+        print(f"  Supply    : {len(supply)} cards, "
+              f"{sum(r[1] for r in supply)} listings")
+    else:
+        print("  Supply    : no listings_history.csv yet, tab skipped")
 
     print(f"Wrote to: {sh.title}")
     print(f"  https://docs.google.com/spreadsheets/d/{sheet_id}")
