@@ -28,6 +28,11 @@ jobs:
           SCRAPERAPI_KEY: ${{ secrets.SCRAPERAPI_KEY }}
         run: python scraper.py
 
+      - name: PSA pop
+        env:
+          PSA_TOKEN: ${{ secrets.PSA_TOKEN }}
+        run: python psa_pop.py
+
       - name: Commit updated data
         run: |
           git config user.name "github-actions[bot]"
@@ -45,8 +50,3 @@ jobs:
           GOOGLE_SA_JSON: ${{ secrets.GOOGLE_SA_JSON }}
           SHEET_ID: ${{ secrets.SHEET_ID }}
         run: python sheets_sync.py
-
-      - name: PSA pop
-        env:
-          PSA_TOKEN: ${{ secrets.PSA_TOKEN }}
-        run: python psa_pop.py
