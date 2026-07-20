@@ -72,24 +72,45 @@ SPEC_IDS = {
 }
 
 
-def fetch_pop(spec_id):
-    """Return (pop10, pop9, total, status) for one specID."""
-    r = requests.get(
-        API.format(spec_id=spec_id),
-        headers={"authorization": f"bearer {TOKEN}"},
-        timeout=30,
-    )
-    if r.status_code == 204:
-        return None, None, None, "no-data"
-    if r.status_code >= 400:
-        return None, None, None, f"http-{r.status_code}"
+def fetch_pop(spec_id, attempts=4):
+    """
+    Return (pop10, pop9, total, status) for one specID.
 
-    data = r.json()
-    pop = data.get("PSAPop") or {}
-    if not pop:
-        return None, None, None, "empty"
-    return (pop.get("Grade10", 0), pop.get("Grade9", 0),
-            pop.get("Total", 0), "ok")
+    PSA rate-limits with HTTP 429. Back off and retry rather than burning
+    the whole run: 5s, 15s, 45s. If it still fails the caller stops early,
+    since a persistent 429 usually means a quota rather than a burst limit.
+    """
+    delay = 5
+    for attempt in range(1, attempts + 1):
+        r = requests.get(
+            API.format(spec_id=spec_id),
+            headers={"authorization": f"bearer {TOKEN}"},
+            timeout=30,
+        )
+
+        if r.status_code == 429:
+            if attempt == attempts:
+                return None, None, None, "http-429"
+            wait = int(r.headers.get("Retry-After") or delay)
+            print(f"      rate limited, waiting {wait}s "
+                  f"(attempt {attempt}/{attempts})")
+            time.sleep(wait)
+            delay *= 3
+            continue
+
+        if r.status_code == 204:
+            return None, None, None, "no-data"
+        if r.status_code >= 400:
+            return None, None, None, f"http-{r.status_code}"
+
+        data = r.json()
+        pop = data.get("PSAPop") or {}
+        if not pop:
+            return None, None, None, "empty"
+        return (pop.get("Grade10", 0), pop.get("Grade9", 0),
+                pop.get("Total", 0), "ok")
+
+    return None, None, None, "http-429"
 
 
 def already_recorded(today):
@@ -119,6 +140,7 @@ def main():
         return
 
     out = []
+    consecutive_429 = 0
     for card, spec_id in sorted(mapped.items()):
         try:
             p10, p9, total, status = fetch_pop(spec_id)
@@ -126,6 +148,16 @@ def main():
             print(f"  {card}: FAILED {e}", file=sys.stderr)
             p10 = p9 = total = None
             status = "error"
+
+        if status == "http-429":
+            consecutive_429 += 1
+            if consecutive_429 >= 3:
+                print("\nThree cards rate-limited in a row - stopping early "
+                      "so the rest can be retried on the next run.",
+                      file=sys.stderr)
+                break
+        else:
+            consecutive_429 = 0
 
         gem = round(p10 / total, 4) if (p10 and total) else ""
         out.append({
@@ -139,8 +171,18 @@ def main():
             "status": status,
         })
         print(f"  {card:<38} pop10={p10} total={total} [{status}]")
-        time.sleep(0.5)  # be polite to the API
+        time.sleep(2)  # be polite to the API
 
+    ok_rows = [r for r in out if r["status"] == "ok"]
+    if not ok_rows:
+        print("No successful lookups; nothing written. "
+              "Likely a rate limit or quota - try again later.",
+              file=sys.stderr)
+        sys.exit(1)
+
+    # only persist rows that actually returned data, so failed lookups
+    # do not pollute the history with blanks
+    out = ok_rows
     exists = os.path.exists(POP_PATH) and os.path.getsize(POP_PATH) > 0
     with open(POP_PATH, "a", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=POP_FIELDS)
