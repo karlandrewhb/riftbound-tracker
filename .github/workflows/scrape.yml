@@ -50,3 +50,8 @@ jobs:
         env:
           SCRAPERAPI_KEY: ${{ secrets.SCRAPERAPI_KEY }}
         run: python pop_test.py
+
+      - name: PSA pop
+        env:
+          PSA_TOKEN: ${{ secrets.PSA_TOKEN }}
+        run: python psa_pop.py
