@@ -23,7 +23,10 @@ from card_resolver import resolve
 
 # --- Config -----------------------------------------------------------------
 
-QUERY = "riftbound psa 10"
+QUERY = "riftbound signature psa 10"
+# Sold listings. Deliberately still the narrow query: the broad one returns
+# thousands of results but parses to zero, and this has been collecting
+# reliably for months. Worth revisiting separately.
 SEARCH_URL = (
     "https://www.ebay.com/sch/i.html"
     "?_nkw={query}"
@@ -482,8 +485,13 @@ def main():
 
     time.sleep(random.uniform(1, 3))
 
-    listings = fetch_all_pages(QUERY, SEARCH_URL, parse_listings,
-                               label="sold")
+    try:
+        html = fetch_page(QUERY)
+    except Exception as e:
+        print(f"ERROR: fetch failed: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    listings = parse_listings(html)
     print(f"Parsed {len(listings)} relevant sold listings.")
 
     if len(listings) == 0:
