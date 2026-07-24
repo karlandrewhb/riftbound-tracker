@@ -33,6 +33,9 @@ jobs:
           PSA_TOKEN: ${{ secrets.PSA_TOKEN }}
         run: python psa_pop.py
 
+      - name: Build site
+        run: python build_site.py
+
       - name: Commit updated data
         run: |
           git config user.name "github-actions[bot]"
