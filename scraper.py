@@ -27,7 +27,7 @@ QUERY = "riftbound psa 10"
 SEARCH_URL = (
     "https://www.ebay.com/sch/i.html"
     "?_nkw={query}"
-    "&LH_Sold=1&LH_Complete=1&_sop=13&_ipg=240&_pgn={page}"
+    "&LH_Sold=1&LH_Complete=1&_sop=13&_ipg=240"
 )
 
 # Active (unsold) listings. The query is deliberately broad because sellers
@@ -38,7 +38,7 @@ ACTIVE_QUERY = "riftbound psa 10"
 ACTIVE_URL = (
     "https://www.ebay.com/sch/i.html"
     "?_nkw={query}"
-    "&_sacat=0&_from=R40&_oaa=1&_sop=1&_ipg=240&_pgn={page}"
+    "&_sacat=0&_from=R40&_oaa=1&_sop=1&_ipg=240"
 )
 
 # Pages to walk per query. The broad search returns several hundred results
@@ -181,7 +181,11 @@ def title_is_relevant(title):
 # --- Scrape -----------------------------------------------------------------
 
 def fetch_page(query, url_template=SEARCH_URL, render=True, page=1):
-    target = url_template.format(query=requests.utils.quote(query), page=page)
+    # eBay's sold search does not respond well to an explicit _pgn=1, so the
+    # parameter is only appended when actually paging past the first page.
+    target = url_template.format(query=requests.utils.quote(query))
+    if page > 1:
+        target += f"&_pgn={page}"
 
     api_key = os.environ.get("SCRAPERAPI_KEY")
     if not api_key:
