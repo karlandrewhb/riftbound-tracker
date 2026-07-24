@@ -24,20 +24,29 @@ from card_resolver import resolve
 # --- Config -----------------------------------------------------------------
 
 QUERY = "riftbound signature psa 10"
+# Sold listings. Deliberately still the narrow query: the broad one returns
+# thousands of results but parses to zero, and this has been collecting
+# reliably for months. Worth revisiting separately.
 SEARCH_URL = (
     "https://www.ebay.com/sch/i.html"
     "?_nkw={query}"
     "&LH_Sold=1&LH_Complete=1&_sop=13&_ipg=240"
 )
 
-# Active (unsold) listings. Uses the category filter _dcat=183454 to scope to
-# trading cards, which cuts noise substantially. _sop=1 = ending soonest.
-ACTIVE_QUERY = "psa 10 signature riftbound"
+# Active (unsold) listings. The query is deliberately broad because sellers
+# title these inconsistently - some omit "signature", some omit "overnumber" -
+# so filtering happens in title_is_relevant() instead of in the search terms.
+# _sop=1 = ending soonest.
+ACTIVE_QUERY = "riftbound psa 10"
 ACTIVE_URL = (
     "https://www.ebay.com/sch/i.html"
     "?_nkw={query}"
-    "&_sacat=0&_from=R40&_oaa=1&_dcat=183454&_sop=1&_ipg=240"
+    "&_sacat=0&_from=R40&_oaa=1&_sop=1&_ipg=240"
 )
+
+# Pages to walk per query. The broad search returns several hundred results
+# at 240 per page; 4 covers it with headroom.
+MAX_PAGES = 4
 
 HERE = os.path.dirname(__file__)
 CSV_PATH = os.path.join(HERE, "sales_history.csv")
@@ -156,19 +165,30 @@ def extract_card_name(title):
     return f"[{flag}]"
 
 
+# A signature card is marked either by the word itself or by an asterisk on
+# the card number (#235*). Sellers use one, the other, or both, so accepting
+# either is what keeps listings like "#235* LEBLANC - DECEIVER PSA 10" from
+# being dropped before the resolver ever sees them.
+SIG_NUMBER_RE = re.compile(r"#\s*\d{2,4}\s*\*")
+
+
 def title_is_relevant(title):
     low = title.lower()
     if "psa 10" not in low:
         return False
-    if "signature" not in low:
+    if "signature" not in low and not SIG_NUMBER_RE.search(title):
         return False
     return not any(term in low for term in EXCLUDE_TERMS)
 
 
 # --- Scrape -----------------------------------------------------------------
 
-def fetch_page(query, url_template=SEARCH_URL, render=True):
+def fetch_page(query, url_template=SEARCH_URL, render=True, page=1):
+    # eBay's sold search does not respond well to an explicit _pgn=1, so the
+    # parameter is only appended when actually paging past the first page.
     target = url_template.format(query=requests.utils.quote(query))
+    if page > 1:
+        target += f"&_pgn={page}"
 
     api_key = os.environ.get("SCRAPERAPI_KEY")
     if not api_key:
@@ -190,6 +210,40 @@ def fetch_page(query, url_template=SEARCH_URL, render=True):
     )
     resp.raise_for_status()
     return resp.text
+
+
+def fetch_all_pages(query, url_template, parser, max_pages=MAX_PAGES,
+                    label="listings"):
+    """
+    Walk result pages until one comes back short or empty.
+
+    The broad query returns several hundred results, so a single page is no
+    longer enough. Stops early when a page yields fewer rows than the page
+    before it, which is how eBay signals the end of the result set.
+    """
+    seen = {}
+    for page in range(1, max_pages + 1):
+        try:
+            html = fetch_page(query, url_template=url_template, page=page)
+        except Exception as e:
+            print(f"  page {page}: fetch failed ({e})", file=sys.stderr)
+            break
+
+        rows = parser(html)
+        new = [r for r in rows if r["item_id"] not in seen]
+        for r in new:
+            seen[r["item_id"]] = r
+        print(f"  page {page}: {len(rows)} relevant, {len(new)} new "
+              f"(running total {len(seen)})")
+
+        if not rows:
+            break
+        if len(rows) < 8:  # a thin page means we are at the tail
+            break
+        if page < max_pages:
+            time.sleep(random.uniform(2, 4))
+
+    return list(seen.values())
 
 
 def _first_text(el, selectors):
@@ -408,14 +462,8 @@ def append_supply(rows, today, status):
 def scrape_active(today):
     print(f"Scraping ACTIVE listings: {ACTIVE_QUERY}")
     time.sleep(random.uniform(2, 5))
-    try:
-        html = fetch_page(ACTIVE_QUERY, url_template=ACTIVE_URL)
-    except Exception as e:
-        print(f"ERROR: active fetch failed: {e}", file=sys.stderr)
-        append_supply([], today, "fetch_failed")
-        return
-
-    rows = parse_active(html)
+    rows = fetch_all_pages(ACTIVE_QUERY, ACTIVE_URL, parse_active,
+                           label="active")
     print(f"Parsed {len(rows)} active listings.")
     if not rows:
         print("WARNING: 0 active listings parsed (block or layout change?).",
