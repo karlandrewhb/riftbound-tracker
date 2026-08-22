@@ -914,3 +914,4 @@ snapshot_date,card_name,listings,low_ask,bin_count,auction_count,total_bids,max_
 2026-08-18,[set-ambiguous] Darius,1,940.0,0,1,15,15,ok
 2026-08-18,[set-ambiguous] Sett,1,3000.0,1,0,0,0,ok
 2026-08-18,[set-ambiguous] Teemo,1,2100.0,0,1,24,24,ok
+2026-08-22,,0,,0,0,0,0,fetch_failed
