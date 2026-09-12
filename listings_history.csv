@@ -1497,3 +1497,4 @@ snapshot_date,card_name,listings,low_ask,bin_count,auction_count,total_bids,max_
 2026-09-11,UNL-237 Poppy Keeper of the Hammer,2,76.0,1,1,7,7,ok
 2026-09-11,[no-match],34,0.99,7,27,238,36,ok
 2026-09-11,[set-ambiguous] Sett,1,3000.0,1,0,0,0,ok
+2026-09-12,,0,,0,0,0,0,fetch_failed
