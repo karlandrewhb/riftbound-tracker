@@ -2054,3 +2054,43 @@ snapshot_date,card_name,listings,low_ask,bin_count,auction_count,total_bids,max_
 2026-09-30,[no-match] CS,1,0.99,0,1,1,1,ok
 2026-09-30,[set-ambiguous] Ahri,1,0.99,0,1,1,1,ok
 2026-09-30,[set-ambiguous] Sett,1,3000.0,1,0,0,0,ok
+2026-10-01,OGN-299 Kai'Sa Daughter of the Void,7,102.5,4,3,39,24,ok
+2026-10-01,OGN-300 Volibear Relentless Storm,4,610.0,3,1,16,16,ok
+2026-10-01,OGN-301 Jinx Loose Cannon,8,910.0,7,1,6,6,ok
+2026-10-01,OGN-302 Darius Hand of Noxus,5,510.0,4,1,11,11,ok
+2026-10-01,OGN-303 Ahri Nine-Tailed Fox,9,1000.0,7,2,34,21,ok
+2026-10-01,OGN-304 Lee Sin Blind Monk,9,860.0,7,2,15,10,ok
+2026-10-01,OGN-305 Yasuo Unforgiven,6,1257.63,2,4,41,19,ok
+2026-10-01,OGN-306 Leona Radiant Dawn,7,860.0,5,2,40,26,ok
+2026-10-01,OGN-307 Teemo Swift Scout,7,0.99,5,2,10,9,ok
+2026-10-01,OGN-308 Viktor Herald of the Arcane,7,742.12,6,1,13,13,ok
+2026-10-01,OGN-309 Miss Fortune Bounty Hunter,11,152.5,3,8,130,37,ok
+2026-10-01,OGN-310 Sett The Boss,5,90.0,5,0,0,0,ok
+2026-10-01,SFD-223 Vayne Hunter,10,23.5,7,3,28,13,ok
+2026-10-01,SFD-224 Aphelios Exalted,5,31.0,4,1,7,7,ok
+2026-10-01,SFD-225 Irelia Fervent,5,0.99,2,3,4,2,ok
+2026-10-01,SFD-227 Ahri Inquisitive,3,6988.0,2,1,39,39,ok
+2026-10-01,SFD-228 Bard Mercurial,5,0.99,1,4,33,22,ok
+2026-10-01,SFD-230 Teemo Strategist,10,1525.0,8,2,21,21,ok
+2026-10-01,SFD-232 Sett Brawler,7,1.25,3,4,14,9,ok
+2026-10-01,SFD-233 Yone Blademaster,6,102.5,2,4,43,18,ok
+2026-10-01,SFD-235 Yasuo Windrider,3,2.25,1,2,11,8,ok
+2026-10-01,SFD-236 Darius Executioner,5,305.0,3,2,7,7,ok
+2026-10-01,SFD-237 Karma Channeler,5,388.0,4,1,0,0,ok
+2026-10-01,SFD-239 Soraka Wanderer,6,0.99,4,2,7,6,ok
+2026-10-01,UNL-226 Jhin Virtuoso,3,0.99,1,2,12,11,ok
+2026-10-01,UNL-227 Rengar Pridestalker,1,1500.0,1,0,0,0,ok
+2026-10-01,UNL-228 Pyke Bloodharbor Ripper,2,102.5,0,2,40,36,ok
+2026-10-01,UNL-229 Vi Piltover Enforcer,3,102.5,1,2,12,7,ok
+2026-10-01,UNL-230 Lillia Bashful Bloom,4,285.0,2,2,56,44,ok
+2026-10-01,UNL-231 Master Yi Wuju Master,6,112.5,0,6,33,8,ok
+2026-10-01,UNL-232 Vex Gloomist,9,102.5,6,3,36,21,ok
+2026-10-01,UNL-233 Ivern Green Father,2,225.5,0,2,23,14,ok
+2026-10-01,UNL-234 Diana Scorn of the Moon,6,3.25,4,2,26,24,ok
+2026-10-01,UNL-235 Leblanc Deceiver,2,510.0,1,1,5,5,ok
+2026-10-01,UNL-236 Kha'Zix Voidreaver,2,455.0,0,2,35,21,ok
+2026-10-01,UNL-237 Poppy Keeper of the Hammer,6,11.5,1,5,40,15,ok
+2026-10-01,[no-match],34,0.99,2,32,431,69,ok
+2026-10-01,[no-match] CS,1,0.99,0,1,1,1,ok
+2026-10-01,[set-ambiguous] Ahri,1,1.25,0,1,2,2,ok
+2026-10-01,[set-ambiguous] Sett,1,3000.0,1,0,0,0,ok
