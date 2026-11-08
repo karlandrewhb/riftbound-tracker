@@ -3196,3 +3196,40 @@ snapshot_date,card_name,listings,low_ask,bin_count,auction_count,total_bids,max_
 2026-11-05,[no-match] UNL,1,99.99,1,0,0,0,ok
 2026-11-05,[set-ambiguous] Sett,1,3000.0,1,0,0,0,ok
 2026-11-05,[set-ambiguous] Yasuo,1,2000.0,1,0,0,0,ok
+2026-11-08,OGN-299 Kai'Sa Daughter of the Void,10,2150.0,8,2,16,16,ok
+2026-11-08,OGN-300 Volibear Relentless Storm,8,0.99,4,4,23,13,ok
+2026-11-08,OGN-301 Jinx Loose Cannon,12,0.99,7,5,21,9,ok
+2026-11-08,OGN-302 Darius Hand of Noxus,4,995.99,4,0,0,0,ok
+2026-11-08,OGN-303 Ahri Nine-Tailed Fox,10,3494.99,8,2,27,27,ok
+2026-11-08,OGN-304 Lee Sin Blind Monk,10,0.99,7,3,6,3,ok
+2026-11-08,OGN-305 Yasuo Unforgiven,6,1.25,3,3,4,2,ok
+2026-11-08,OGN-306 Leona Radiant Dawn,11,5.64,6,5,19,7,ok
+2026-11-08,OGN-307 Teemo Swift Scout,8,530.0,6,2,14,13,ok
+2026-11-08,OGN-308 Viktor Herald of the Arcane,5,0.99,4,1,1,1,ok
+2026-11-08,OGN-309 Miss Fortune Bounty Hunter,8,0.99,4,4,21,10,ok
+2026-11-08,OGN-310 Sett The Boss,7,0.99,4,3,24,13,ok
+2026-11-08,SFD-223 Vayne Hunter,10,202.5,7,3,55,40,ok
+2026-11-08,SFD-224 Aphelios Exalted,6,315.0,5,1,7,7,ok
+2026-11-08,SFD-225 Irelia Fervent,8,405.0,4,4,40,31,ok
+2026-11-08,SFD-227 Ahri Inquisitive,8,0.99,5,3,30,27,ok
+2026-11-08,SFD-228 Bard Mercurial,4,0.99,0,4,13,11,ok
+2026-11-08,SFD-230 Teemo Strategist,6,300.0,4,2,8,5,ok
+2026-11-08,SFD-232 Sett Brawler,2,0.01,0,2,3,2,ok
+2026-11-08,SFD-233 Yone Blademaster,6,0.99,1,5,29,10,ok
+2026-11-08,SFD-235 Yasuo Windrider,3,0.99,1,2,7,7,ok
+2026-11-08,SFD-236 Darius Executioner,5,417.99,4,1,0,0,ok
+2026-11-08,SFD-237 Karma Channeler,5,5.6,4,1,2,2,ok
+2026-11-08,SFD-239 Soraka Wanderer,6,510.0,5,1,10,10,ok
+2026-11-08,UNL-226 Jhin Virtuoso,2,305.0,1,1,7,7,ok
+2026-11-08,UNL-228 Pyke Bloodharbor Ripper,3,0.99,0,3,6,4,ok
+2026-11-08,UNL-229 Vi Piltover Enforcer,2,610.0,1,1,9,9,ok
+2026-11-08,UNL-230 Lillia Bashful Bloom,2,510.99,2,0,0,0,ok
+2026-11-08,UNL-231 Master Yi Wuju Master,1,0.99,0,1,1,1,ok
+2026-11-08,UNL-232 Vex Gloomist,9,152.5,6,3,17,9,ok
+2026-11-08,UNL-234 Diana Scorn of the Moon,5,1900.0,5,0,0,0,ok
+2026-11-08,UNL-235 Leblanc Deceiver,2,485.0,0,2,21,14,ok
+2026-11-08,[no-match],37,0.99,10,27,117,32,ok
+2026-11-08,[no-match] OGN,1,55715.0,1,0,0,0,ok
+2026-11-08,[no-match] UNL,2,0.99,1,1,0,0,ok
+2026-11-08,[set-ambiguous] Sett,1,3000.0,1,0,0,0,ok
+2026-11-08,[set-ambiguous] Yasuo,1,2000.0,1,0,0,0,ok
